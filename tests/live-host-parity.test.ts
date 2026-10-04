@@ -5,9 +5,23 @@
  * Method: the mock suite (30 tests) proves plugin policy against the SDK
  * mock host. This file proves what the live host actually offers by reading
  * the Core checkout read-only (never executed, never written) plus fresh
- * mock angles the CTX-0003 suite never takes. Every gap below is asserted
- * as a gap so the suite stays green while recording the defect: verification
- * only, no fixes.
+ * mock angles the CTX-0003 suite never takes.
+ *
+ * Re-verification (CTX-0004b): the first pass probed Core @fea38d86, which
+ * predates the history-read host merge (bitty PR #1673 -> 76fa42d6, now in
+ * main). Every probe here pins FRESH origin/main (c246e52 at re-probe time)
+ * via `git show origin/main:<path>` — read-only plumbing, never a working
+ * tree write — with a working-tree fallback for offline runs. Result: all
+ * five former gaps (GAP-1..GAP-5) REFUTE as stale-Core artifacts. The
+ * history-read surface (capability family, gate, taxonomy, budgets,
+ * capture/purge/trust/safe-mode) exists live with the exact codes and
+ * bounds the plugin's mock enforces. Verdict: PASS.
+ *
+ * Surface binding note: the plugin binds the history-read snapshot surface
+ * (panel/workspace scopes, HistoryGate), never the view-bound live-grid
+ * search surface (ViewId, HostOpError, 1000-match cap). Assertions that once
+ * read as divergences compared the plugin against the wrong surface; each
+ * refutation below names both surfaces.
  *
  * Live Core identity is resolved from the workspace environment
  * (`BITTY_WORKSPACE`) with a relative fallback, never a checkout literal.
@@ -16,6 +30,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,7 +70,6 @@ const PLUGIN_ROWS_PER_QUERY = 16;
 const PLUGIN_BYTES_PER_QUERY = 4096;
 const SCOPE_ID_CAP = 128;
 const COPY_BOUND = 8192;
-const CORE_RESULTS_CAP = 1000;
 const WINDOW_QUERIES = 4;
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
@@ -85,6 +99,60 @@ function coreExists(path: string): boolean {
   }
 }
 
+/** Bitty checkout directory (derived, never a literal). */
+function coreDir(): string {
+  return coreFile("");
+}
+
+/**
+ * Read a Core file pinned to FRESH origin/main via read-only git plumbing.
+ * Falls back to the working-tree read for offline runs; the fallback can
+ * only lag the pinned revision, never lead it.
+ */
+function readFresh(path: string): string {
+  const rel = path.split("/").join("/");
+  try {
+    return execFileSync(
+      "git",
+      ["-C", coreDir(), "show", `origin/main:${rel}`],
+      {
+        encoding: "utf8",
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+  } catch {
+    return readFileSync(coreFile(path), "utf8");
+  }
+}
+
+function freshExists(path: string): boolean {
+  const rel = path.split("/").join("/");
+  try {
+    execFileSync(
+      "git",
+      ["-C", coreDir(), "cat-file", "-e", `origin/main:${rel}`],
+      { stdio: "ignore" },
+    );
+    return true;
+  } catch {
+    return coreExists(path);
+  }
+}
+
+/** Resolved fresh-main revision the probes actually read. */
+function freshRev(): string {
+  try {
+    return execFileSync("git", ["-C", coreDir(), "rev-parse", "origin/main"], {
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "unknown";
+  }
+}
+
+/** History-read host merge; must be an ancestor of the probed revision. */
+const HISTORY_READ_MERGE = "76fa42d6";
+
 const SEARCH_HOST = join(
   "crates",
   "bitty-runtime",
@@ -94,6 +162,14 @@ const SEARCH_HOST = join(
 );
 const TERM_SEARCH = join("crates", "bitty-term-state", "src", "search.rs");
 const CLIPBOARD = join("crates", "bitty-platform", "src", "clipboard.rs");
+const HISTORY_READ = join(
+  "crates",
+  "bitty-plugin-host",
+  "src",
+  "history_read.rs",
+);
+const MANIFEST = join("crates", "bitty-package", "src", "manifest.rs");
+const CAPABILITY = join("crates", "bitty-plugin-host", "src", "capability.rs");
 
 const ROWS = [
   { panel: "pane-a", workspace: "ws-1", seq: 0, body: "redacted alpha one" },
@@ -146,6 +222,27 @@ describe("live Core identity (read-only source evidence)", () => {
   test("Core snapshots are caller-only and never on the Event Bus", () => {
     const source = readCore(SEARCH_HOST);
     expect(source).toMatch(/never published on the Event Bus/);
+  });
+
+  test("probes pin fresh origin/main containing the history-read merge", () => {
+    const rev = freshRev();
+    expect(rev).toMatch(/^[0-9a-f]{40}$/);
+    expect(() =>
+      execFileSync(
+        "git",
+        [
+          "-C",
+          coreDir(),
+          "merge-base",
+          "--is-ancestor",
+          HISTORY_READ_MERGE,
+          "origin/main",
+        ],
+        { stdio: "ignore" },
+      ),
+    ).not.toThrow();
+    // The history-read surface the plugin binds exists at the pinned rev.
+    expect(freshExists(HISTORY_READ)).toBe(true);
   });
 });
 
@@ -209,26 +306,26 @@ describe("parity that holds live (needle, clipboard, no-streaming, export gate)"
   });
 });
 
-describe("gaps blocking W-144 (reported, not fixed)", () => {
-  test("GAP-1: Core exposes no transcript history Lua binding", () => {
-    // The plugin's sole read surface exists only in the SDK mock.
-    // A repo-wide Core grep for the binding finds no Lua host surface.
-    const host = readCore(SEARCH_HOST);
-    expect(host).not.toMatch(/history\.transcript\.query/);
-    expect(host).not.toMatch(/bitty\.history/);
-    expect(host).not.toMatch(/bitty\.selection\.copy/);
-    // Install gate: the closed capability set has no history.* head, so the
-    // shipped manifest (history.transcript.read) fails closed at install.
-    const manifest = readCore(
-      join("crates", "bitty-package", "src", "manifest.rs"),
-    );
+describe("former gaps refuted live (stale-Core artifacts, not divergences)", () => {
+  test("R1 (ex-GAP-1): transcript history surface exists; install no longer fails closed", () => {
+    // The first pass probed pre-merge Core and found no history.* head.
+    // Fresh main carries the closed heads plus the gate module itself.
+    const manifest = readFresh(MANIFEST);
     expect(manifest).toMatch(/CLOSED_CAPABILITY_HEADS/);
-    expect(manifest).not.toMatch(/"history\.transcript\.read"/);
-    expect(manifest).not.toMatch(/"history\.[a-z]/);
+    expect(manifest).toMatch(/"history\.transcript\.read"/);
+    expect(manifest).toMatch(/"history\.commands\.read"/);
+    expect(manifest).toMatch(/"history\.kv\.read"/);
+    const capability = readFresh(CAPABILITY);
+    expect(capability).toMatch(/"history" => Some\(Self::History\)/);
+    // The `bitty.history.transcript.query` Lua spelling lives in the SDK by
+    // Core's own layering (host crate: "Exact Lua spellings" parked to
+    // W-139/SDK) — a binding note, never a live divergence.
+    expect(readFresh(HISTORY_READ)).toMatch(/Exact Lua spellings/);
   });
 
-  test("GAP-2: Core has no 8-category E_HISTORY denial taxonomy", () => {
-    const host = readCore(SEARCH_HOST);
+  test("R2 (ex-GAP-2): Core carries the exact 8-category E_HISTORY taxonomy", () => {
+    const gate = readFresh(HISTORY_READ);
+    expect(gate).toMatch(/pub enum HistoryDenialKind/);
     for (const code of [
       "E_HISTORY_MISSING_GRANT",
       "E_HISTORY_REVOKED_GRANT",
@@ -239,43 +336,63 @@ describe("gaps blocking W-144 (reported, not fixed)", () => {
       "E_HISTORY_TRUST_DENIED",
       "E_HISTORY_UNAVAILABLE",
     ]) {
-      expect(host).not.toContain(code);
+      expect(gate).toContain(code);
     }
-    // Core reports cross-view/missing-capability as Denied, replaced
-    // generations as Stale, and missing grids as Unavailable: 3 outcomes,
-    // not the 8 typed history denials the plugin surfaces verbatim.
-    expect(host).toMatch(/pub enum HostOpError/);
+    // The 3-outcome HostOpError still serves the separate view-bound
+    // live-grid surface the plugin never binds (see R3).
+    expect(readFresh(SEARCH_HOST)).toMatch(/pub enum HostOpError/);
   });
 
-  test("GAP-3: scope model differs (Core ViewId vs panel/workspace)", () => {
-    const host = readCore(SEARCH_HOST);
-    expect(host).toMatch(/view:\s*ViewId/);
-    expect(host).not.toMatch(/panel.*workspace|workspace.*panel/);
-    // The plugin requires an explicit panel/workspace scope on every query;
-    // Core binds a search to one live view grid instead.
+  test("R3 (ex-GAP-3): Core history scope is panel/workspace, like the plugin", () => {
+    const gate = readFresh(HISTORY_READ);
+    expect(gate).toMatch(/HistoryScope/);
+    expect(gate).toMatch(/MAX_SCOPE_ID_BYTES: usize = 128/);
+    // No wildcard, no `all` default: same closed extent model as the mock.
+    expect(gate).toContain('"*"');
+    expect(gate).toContain('"all"');
+    // ViewId binding belongs to the live-grid search surface, a different
+    // surface the plugin does not bind — never a scope divergence.
+    expect(readFresh(SEARCH_HOST)).toMatch(/view:\s*ViewId/);
     const run = verify();
     expect(run).toBeDefined();
   });
 
-  test("GAP-4: result and window budgets differ (1000 vs 16; no query windows live)", () => {
-    const termSearch = readCore(TERM_SEARCH);
-    expect(termSearch).toContain(String(CORE_RESULTS_CAP));
-    // The plugin caps a page at 16 rows / 4096 bytes with a 4-query window;
-    // Core caps at 1000 matches with no per-plugin query/byte windows.
-    const host = readCore(SEARCH_HOST);
-    expect(host).not.toMatch(/HISTORY_MAX_QUERIES_PER_WINDOW/);
-    expect(host).not.toMatch(/HISTORY_MAX_BYTES_PER_WINDOW/);
-    expect(host).not.toMatch(/capture.*opt-in|capture_disabled/i);
+  test("R4 (ex-GAP-4): Core has per-plugin query/byte windows matching plugin bounds", () => {
+    const gate = readFresh(HISTORY_READ);
+    expect(gate).toMatch(/max_rows_per_query/);
+    expect(gate).toMatch(/max_bytes_per_query/);
+    expect(gate).toMatch(/max_queries_per_window/);
+    expect(gate).toMatch(/max_bytes_per_window/);
+    // Core's own gate tests exercise exactly the plugin bounds
+    // (16 rows / 4096 B / 256 B rows / 4-query window / 8192 B window);
+    // production defaults stay caller-provided per the module docs.
+    expect(gate).toContain("HistoryCaps::new(16, 4096, 256, 4, 8192)");
+    // The 1000-match cap belongs to the live-grid surface, not history-read.
+    expect(readFresh(TERM_SEARCH)).toMatch(
+      /SEARCH_MAX_RESULTS:\s*usize\s*=\s*1000/,
+    );
   });
 
-  test("GAP-5: capture opt-in, purge, and trust levels have no live counterpart", () => {
-    const host = readCore(SEARCH_HOST);
-    expect(host).not.toMatch(/E_HISTORY_CAPTURE_DISABLED/);
-    expect(host).not.toMatch(/E_HISTORY_UNAVAILABLE/);
-    expect(host).not.toMatch(/E_HISTORY_TRUST_DENIED/);
-    // Safe mode is unaffected Core-side (mechanisms stay usable); the mock
-    // denies history reads in safe mode while Core documents no such denial.
-    expect(host).toMatch(/Safe mode is unaffected/);
+  test("R5 (ex-GAP-5): capture, purge, trust, and safe-mode denials exist live", () => {
+    const gate = readFresh(HISTORY_READ);
+    // Capture opt-in, default off for terminal-derived sources.
+    expect(gate).toMatch(/set_capture/);
+    expect(gate).toMatch(/requires_capture/);
+    expect(gate).toContain("capture.insert(HistorySource::Transcript, false)");
+    // Purge: typed unavailability; purged-only search reads empty (no oracle).
+    expect(gate).toMatch(/PurgedOrExpired/);
+    expect(gate).toContain("search_never_matches_purged_rows");
+    // Trust admission: standing grants for L1/L2, single-use for L3/L4,
+    // Core itself reads nothing as a plugin.
+    expect(gate).toMatch(/TrustLevel::BundledLua \| TrustLevel::ThirdPartyLua/);
+    expect(gate).toMatch(
+      /TrustLevel::NativeSidecar \| TrustLevel::ExternalTool/,
+    );
+    expect(gate).toMatch(/TrustLevel::Core => false/);
+    // Safe mode denies history reads; "unaffected" is the live-grid surface.
+    expect(gate).toMatch(/set_safe_mode/);
+    expect(gate).toMatch(/SafeMode => "E_HISTORY_SAFE_MODE"/);
+    expect(readFresh(SEARCH_HOST)).toMatch(/Safe mode is unaffected/);
   });
 });
 
