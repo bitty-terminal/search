@@ -5,16 +5,16 @@ snapshot queries over the public history API only. Accepted contracts are
 W-135 (search-selection contract, bitty-terminal-docs `b0514e6`), W-131
 (storage-and-history boundary, bitty-docs `21d63dc`), and W-137
 (history-and-storage policy, bitty-plugins-docs `002c7ce`); the SDK binding
-is bitty-plugin-sdk at `0a9487f` (PR #144 head, OPEN; see the pin note
-below). Core host evidence is W-143 (bitty `0d50b436`) plus the history-read
-host (bitty `76fa42d6`).
+is bitty-plugin-sdk at `3ea8e58` (merged `main`; see the pin note below).
+Core host evidence is W-143 (bitty `0d50b436`) plus the history-read host
+(bitty `76fa42d6`).
 
 ## Scope
 
 - `bitty-plugin.toml`: plugin id `bitty-terminal.search`, version `0.0.1`,
-  compat `bitty >=0.5,<1.0` with `plugin-api ^1.0`, exactly one capability
-  (`history.transcript.read`), lazy `search`/`next`/`prev`/`clear`/`copy`
-  commands and no event subscriptions.
+  compat `bitty >=0.0.24,<0.1` with `plugin-api ^1.0`, exactly one capability
+  (`history.transcript.read`), declared `row_count`/`max_bytes` settings, lazy
+  `search`/`next`/`prev`/`clear`/`copy` commands and no event subscriptions.
 - `lua/search/init.lua`: the whole policy. Snapshot query state (scope,
   needle, bounds, cached page, cursor) as presentation state that never
   mutates Terminal Truth; explicit-scope `search`/`list`/`tail` queries over
@@ -50,6 +50,12 @@ host (bitty `76fa42d6`).
 - Bounds mirror the SDK/Core test caps: 256-byte needle, 16 rows / 4096 bytes
   per query, 128-byte scope ids, 8192-byte copy bound (host-enforced with a
   `truncated` flag). Shapes are normative; numbers are harness placeholders.
+- `[settings]` declares exactly `row_count` (`int`, default 10) and
+  `max_bytes` (`int`, default 4096): the only keys the entry point reads.
+  Core denies an undeclared read with `E_SETTINGS_UNDECLARED`; the plugin reads
+  each key behind `pcall`, degrades to the documented default, and records one
+  bounded `SETTINGS_DEGRADED` diagnostic (192 bytes) instead of aborting
+  activation or rendering an unexplained empty page.
 
 ## Non-goals (CTX-0003 only)
 
@@ -70,11 +76,11 @@ nothing for the generation.
 
 ## SDK pin note
 
-`package.json` pins `bitty-plugin-sdk` to `0a9487f6c6f47ea0e3cadc9b710e7b1150485822`,
-the head of PR #144 (CTX-0066, W-139 history/search/selection surface), which
-is OPEN. The pin tracks that PR head rather than a merged release so the
-`history.transcript.query` / `selection.copy` gate shapes, the
-`history.transcript.read` head, and the 8-category denial taxonomy match the
-reviewed surface byte-for-byte. Re-pin to the #144 merge commit when it
-lands; derivation of every spelling and bound used here is recorded in
-`docs/lua-defs.md` and `docs/mock-host.md` of that PR branch.
+`package.json` pins `bitty-plugin-sdk` to `3ea8e58f6e4da0ce8dcc2c8ade7fe348ec6c9ecb`,
+a merged `main` commit. It carries the W-139 history/search/selection surface
+(PR #144) plus the closed-set parity for `[settings]` declarations and the
+mock-host declared-keys gate (PR #152). The linter accepts the `[settings]`
+block and the harness denies undeclared reads with the same
+`E_SETTINGS_UNDECLARED` code the Core host raises, so the activation regression
+is reproducible locally. Derivation of every spelling and bound used here is
+recorded in `docs/lua-defs.md` and `docs/mock-host.md` of the SDK.
