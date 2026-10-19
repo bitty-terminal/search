@@ -37,6 +37,17 @@ license = "MIT"
 bitty = ">=0.0.24,<0.1"
 plugin-api = "^1.0"
 
+[settings]
+# Declared settings keys: values-plane only, never authority. These are exactly
+# the keys `lua/search/init.lua` reads through `bitty.settings.get`; the host
+# fails closed with `E_SETTINGS_UNDECLARED` for anything outside this set, so an
+# undeclared read aborts activation. Defaults mirror `DEFAULT_ROW_COUNT` (10)
+# and `DEFAULT_MAX_BYTES` (4096) in the entry point. Both values are bounded by
+# the host per query (16 rows / 4096 bytes); an out-of-range configured value
+# falls back to these defaults instead of widening a query.
+row_count = { type = "int", default = 10 }
+max_bytes = { type = "int", default = 4096 }
+
 [capabilities]
 # Deny by default; each capability is requested one by one. This is the exact
 # minimal set the search policy needs; nothing else is declared or used.

@@ -49,6 +49,7 @@ M.COPY_MAX_BYTES = 8192 -- selection-copy bound (host-enforced, truncated flag)
 M.DEFAULT_ROW_COUNT = 10 -- default page depth when settings carry none
 M.DEFAULT_MAX_BYTES = 4096 -- default page byte budget when settings carry none
 M.REQUIRED_API_MAJOR = 1 -- manifest declares plugin-api ^1.0; same gate here
+M.MAX_DIAGNOSTIC_BYTES = 192 -- bound on every operator-facing diagnostic
 
 -- Core-attached label every history record carries (survives truncation). The
 -- plugin surfaces it and never treats a body as trusted, however labeled.
@@ -58,6 +59,7 @@ M.UNTRUSTED_LABEL = "untrusted-observation"
 M.CODE_DISABLED = "E_DISABLED"
 M.CODE_NO_RESULTS = "NO_RESULTS"
 M.CODE_CLEARED = "CLEARED"
+M.CODE_SETTINGS_DEGRADED = "SETTINGS_DEGRADED"
 
 -- ---------------------------------------------------------------------------
 -- Pure validators (host-independent; the host remains the denial authority)
@@ -166,6 +168,10 @@ end
 
 M.disabled = false
 M.disabled_reason = ""
+-- Bounded activation diagnostic when a settings read is denied; empty when
+-- every read succeeded. Kept separately so a successful query does not erase
+-- the reason the configured defaults were not used.
+M.settings_diagnostic = ""
 
 local page = {
   scope_panel = nil,
@@ -182,9 +188,18 @@ local page = {
   last_detail = "",
 }
 
+-- Host denial text is untrusted presentation input; clamp it to a fixed byte
+-- budget so no diagnostic can grow the UI without bound.
+local function bounded_text(text)
+  if #text <= M.MAX_DIAGNOSTIC_BYTES then
+    return text
+  end
+  return string.sub(text, 1, M.MAX_DIAGNOSTIC_BYTES - 3) .. "..."
+end
+
 local function note(code, detail)
   page.last_code = code
-  page.last_detail = detail or ""
+  page.last_detail = bounded_text(detail or "")
 end
 
 -- Host-dependent entries below require the injected `bitty` table; the pure
@@ -538,6 +553,13 @@ function M.last_detail()
   return page.last_detail
 end
 
+-- Bounded activation diagnostic for settings reads ("" when all reads
+-- succeeded). Persists across queries because it describes generation setup,
+-- not the current result page.
+function M.settings_status()
+  return M.settings_diagnostic
+end
+
 -- ---------------------------------------------------------------------------
 -- Host wiring. Skipped when the host table is absent so the pure policy
 -- above (validators, compat gate, cursor steps) stays loadable on its own.
@@ -565,8 +587,47 @@ do
     return M
   end
 
-  local function setting(key, default)
-    local value = bitty.settings.get(key)
+  -- Resolves the settings bridge without indexing a missing link: evaluating
+  -- `bitty.settings.get` before pcall would raise a nil-index error the pcall
+  -- can never catch.
+  local function settings_get_fn()
+    if bitty == nil then
+      return nil
+    end
+    local settings = bitty.settings
+    if settings == nil then
+      return nil
+    end
+    local get = settings.get
+    if type(get) ~= "function" then
+      return nil
+    end
+    return get
+  end
+
+  -- Extracts the E_* code from a caught settings denial. Core raises a table
+  -- carrying `code`; a bridged JS error arrives as its message string.
+  local function error_code(err)
+    if type(err) == "table" and type(err.code) == "string" then
+      return err.code
+    end
+    return host_code(err)
+  end
+
+  -- Each declared key is read at most once, behind pcall. A denied read (for
+  -- example E_SETTINGS_UNDECLARED on a host whose manifest gate disagrees with
+  -- this file) degrades to the documented default and records a bounded
+  -- diagnostic instead of aborting activation with no commands registered.
+  local function setting(get_fn, key, default, problems)
+    if get_fn == nil then
+      problems[#problems + 1] = key .. ": settings bridge unavailable"
+      return default
+    end
+    local ok, value = pcall(get_fn, key)
+    if not ok then
+      problems[#problems + 1] = key .. ": " .. error_code(value)
+      return default
+    end
     if value == nil then
       return default
     end
@@ -575,15 +636,22 @@ do
 
   -- Default page bounds: validated, fail-closed to the documented defaults.
   -- A bad configuration never widens a query and never widens authority.
-  local default_rows = setting("row_count", M.DEFAULT_ROW_COUNT)
-  local default_bytes = setting("max_bytes", M.DEFAULT_MAX_BYTES)
-  if M.validate_bounds(default_rows or M.DEFAULT_ROW_COUNT,
-      default_bytes or M.DEFAULT_MAX_BYTES) == nil then
-    if page.last_code == "ok" then
-      note("BOUNDS_FALLBACK", "invalid default bounds; using 10 rows / 4096 bytes")
-    end
+  local get_setting = settings_get_fn()
+  local problems = {}
+  local default_rows = setting(get_setting, "row_count", M.DEFAULT_ROW_COUNT, problems)
+  local default_bytes = setting(get_setting, "max_bytes", M.DEFAULT_MAX_BYTES, problems)
+  local settings_degraded = #problems > 0
+  if M.validate_bounds(default_rows, default_bytes) == nil then
+    problems[#problems + 1] = "invalid default bounds; using 10 rows / 4096 bytes"
     default_rows = M.DEFAULT_ROW_COUNT
     default_bytes = M.DEFAULT_MAX_BYTES
+  end
+  if settings_degraded then
+    -- Surface the denial (never a silent empty result page) within the bound.
+    M.settings_diagnostic = bounded_text(table.concat(problems, "; "))
+    note(M.CODE_SETTINGS_DEGRADED, M.settings_diagnostic)
+  elseif #problems > 0 then
+    note("BOUNDS_FALLBACK", table.concat(problems, "; "))
   end
 
   local search_schema = {

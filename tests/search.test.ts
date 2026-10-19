@@ -12,7 +12,11 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 
-import { lintManifestSource, MockHost } from "bitty-plugin-sdk";
+import {
+  lintManifestSource,
+  loadManifestModel,
+  MockHost,
+} from "bitty-plugin-sdk";
 import { LuaFactory, type LuaEngine } from "wasmoon";
 
 import {
@@ -175,6 +179,57 @@ describe("manifest", () => {
     expect([...SEARCH_CAPABILITIES].sort()).toEqual(
       ["history.transcript.read"].sort(),
     );
+  });
+});
+
+describe("declared settings (0.0.24 activation regression)", () => {
+  test("manifest declares exactly the settings keys the entry point reads", () => {
+    const model = loadManifestModel(MANIFEST_SOURCE);
+    expect(model.hasSettingsTable).toBe(true);
+    expect([...model.settings.keys()].sort()).toEqual([
+      "max_bytes",
+      "row_count",
+    ]);
+    expect(model.settings.get("row_count")).toEqual({
+      kind: "int",
+      default: 10,
+    });
+    expect(model.settings.get("max_bytes")).toEqual({
+      kind: "int",
+      default: 4096,
+    });
+  });
+
+  test("activation registers the search command with the declared defaults", async () => {
+    const run = await search();
+    seedTranscript(run, [...ROWS]);
+    const out = query(run, "deploy log");
+    expect(out).toEqual({ ok: true, code: "FOUND" });
+    expect(await resultCount(run)).toBe(2);
+    expect(await run.query("search.settings_status()")).toBe("");
+  });
+
+  test("a denied settings read degrades, registers, and surfaces one bounded diagnostic", async () => {
+    // Same manifest shape, but the declared keys are not the ones the entry
+    // point reads: the host now denies each read with E_SETTINGS_UNDECLARED.
+    // Before the guarded read this aborted activation and no command existed.
+    const undeclared = MANIFEST_SOURCE.replace(
+      'row_count = { type = "int", default = 10 }',
+      'legacy_rows = { type = "int", default = 10 }',
+    ).replace(
+      'max_bytes = { type = "int", default = 4096 }',
+      'legacy_bytes = { type = "int", default = 4096 }',
+    );
+    const run = await search({}, undeclared);
+    expect(await run.query("search.last_code()")).toBe("SETTINGS_DEGRADED");
+    const diagnostic = (await run.query("search.settings_status()")) as string;
+    expect(diagnostic).toContain("row_count: E_SETTINGS_UNDECLARED");
+    expect(diagnostic).toContain("max_bytes: E_SETTINGS_UNDECLARED");
+    expect(diagnostic.length).toBeLessThanOrEqual(192);
+    seedTranscript(run, [...ROWS]);
+    expect(query(run, "deploy log")).toEqual({ ok: true, code: "FOUND" });
+    // A successful query does not erase the activation diagnostic.
+    expect(await run.query("search.settings_status()")).toBe(diagnostic);
   });
 });
 
