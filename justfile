@@ -66,6 +66,7 @@ check:
     just manifest
     just lua
     just lua-control
+    just docs-check
     just test
 
 # Install pinned dev dependencies from bun.lock. This is the only gate step
@@ -95,6 +96,10 @@ lua: deps
 # the generated entry point.
 lua-control: deps
     @! bunx --bun luaparse@{{luaparse_pin}} --quiet --code 'local ='
+
+# Fail when the README Configuration table drifts from the manifest [settings].
+docs-check:
+    bun tests/check-docs.mjs
 
 # Run the search behavior suite: `lua/search/init.lua` executes in a
 # pinned Lua VM (wasmoon) against the pinned SDK mock host, which owns every
