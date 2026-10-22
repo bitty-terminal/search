@@ -21,8 +21,8 @@ bodies are untrusted observation text, displayed verbatim and never executed.
 
 Prerequisites:
 
-- Bitty `>=0.0.24,<0.1` with Plugin API `^1.0` (the manifest `[compat]`
-  range).
+- Bitty `>=0.0.24` with Plugin API `^1.0` (the manifest `[compat]` minimum;
+  no upper bound is declared).
 - Opt-in capture enabled for transcript history. Without it, queries return
   `E_HISTORY_CAPTURE_DISABLED`.
 - Consent to `history.transcript.read`. The plugin requests no clipboard,
@@ -122,7 +122,7 @@ denies with `E_HISTORY_SCOPE_MISMATCH`.
 | Code                         | Class        | Cause                                                                                                  | Remedy                                                                                                                                             |
 | ---------------------------- | ------------ | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `E_SETTINGS_UNDECLARED`      | `validation` | A settings read named a key absent from the manifest `[settings]` declarations.                        | Install a plugin version whose declarations match the running build. Only `row_count` and `max_bytes` are declared.                                |
-| `E_INCOMPATIBLE`             | `validation` | The running host is outside `>=0.0.24,<0.1`, or Plugin API is not `^1.0`.                              | Upgrade Bitty or install a Search release whose `[compat]` range covers your host.                                                                 |
+| `E_INCOMPATIBLE`             | `validation` | The running host does not satisfy `>=0.0.24`, or Plugin API is not `^1.0`.                             | Upgrade Bitty or install a Search release whose `[compat]` minimum covers your host.                                                               |
 | `E_CAPABILITY_DENIED`        | `runtime`    | The transcript grant is missing, revoked, or expired, or `copy` ran without a `clipboard.write` grant. | Re-grant `history.transcript.read` and restart. For `copy`, this release intentionally has no clipboard grant; use the host's own copying instead. |
 | `E_HISTORY_MISSING_GRANT`    | `runtime`    | No per-plugin transcript read grant is recorded (deny by default).                                     | Approve `history.transcript.read`.                                                                                                                 |
 | `E_HISTORY_REVOKED_GRANT`    | `runtime`    | The grant existed but was revoked or expired after activation.                                         | Re-grant it and restart Bitty; a live generation keeps the grant bound at activation.                                                              |
@@ -140,7 +140,8 @@ for tests or headless use; neither state exposes commands.
 ## Scope
 
 - `bitty-plugin.toml`: plugin id `bitty-terminal.search`, version `0.0.1`,
-  compat `bitty >=0.0.24,<0.1` with `plugin-api ^1.0`, exactly one capability
+  compat floor `bitty >=0.0.24` with `plugin-api ^1.0` and no upper bound,
+  exactly one capability
   (`history.transcript.read`), declared `row_count`/`max_bytes` settings, lazy
   `search`/`next`/`prev`/`clear`/`copy` commands and no event subscriptions.
 - `lua/search/init.lua`: the whole policy. Snapshot query state (scope,
@@ -198,7 +199,9 @@ for tests or headless use; neither state exposes commands.
 ## Compat
 
 The host validates `plugin-api ^1.0` before activation and fails closed on
-mismatch. The plugin repeats the major-version gate at load as
+mismatch. Host compatibility is minimum-only: `[compat].bitty` declares the
+verified floor `>=0.0.24` and no ceiling, so newer hosts install without a
+manifest edit. The plugin repeats the major-version gate at load as
 defense in depth: on mismatch it records `disabled_reason` and registers
 nothing for the generation.
 
