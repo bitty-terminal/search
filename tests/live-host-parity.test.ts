@@ -150,6 +150,27 @@ function freshRev(): string {
   }
 }
 
+/**
+ * True when the Core checkout is shallow. A shallow clone grafts its boundary
+ * commits parentless, so `git merge-base --is-ancestor` cannot traverse past
+ * the boundary: an old merge commit is then reported as unreachable even when
+ * it is an ancestor upstream. The ancestry proof is skipped with a notice in
+ * that case; the surface assertion still proves the capability is present.
+ */
+function coreIsShallow(): boolean {
+  try {
+    return (
+      execFileSync(
+        "git",
+        ["-C", coreDir(), "rev-parse", "--is-shallow-repository"],
+        { encoding: "utf8" },
+      ).trim() === "true"
+    );
+  } catch {
+    return false;
+  }
+}
+
 /** History-read host merge; must be an ancestor of the probed revision. */
 const HISTORY_READ_MERGE = "76fa42d6";
 
@@ -255,20 +276,28 @@ describe.skipIf(!CORE_PRESENT)(
     test("probes pin fresh origin/main containing the history-read merge", () => {
       const rev = freshRev();
       expect(rev).toMatch(/^[0-9a-f]{40}$/);
-      expect(() =>
-        execFileSync(
-          "git",
-          [
-            "-C",
-            coreDir(),
-            "merge-base",
-            "--is-ancestor",
-            HISTORY_READ_MERGE,
-            "origin/main",
-          ],
-          { stdio: "ignore" },
-        ),
-      ).not.toThrow();
+      if (coreIsShallow()) {
+        console.log(
+          `Core checkout at ${coreDir()} is shallow; ` +
+            `skipping the ${HISTORY_READ_MERGE} ancestry proof ` +
+            `(the surface assertion below still runs)`,
+        );
+      } else {
+        expect(() =>
+          execFileSync(
+            "git",
+            [
+              "-C",
+              coreDir(),
+              "merge-base",
+              "--is-ancestor",
+              HISTORY_READ_MERGE,
+              "origin/main",
+            ],
+            { stdio: "ignore" },
+          ),
+        ).not.toThrow();
+      }
       // The history-read surface the plugin binds exists at the pinned rev.
       expect(freshExists(HISTORY_READ)).toBe(true);
     });
