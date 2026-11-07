@@ -105,7 +105,7 @@ return {
   keymaps = {
     {
       chord = "ctrl+n",
-      action = "bitty-terminal.search:next",
+      action = "command:bitty-terminal.search:next",
       context = "global",
     },
   },
