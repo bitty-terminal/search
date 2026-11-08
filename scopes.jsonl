@@ -18,3 +18,5 @@
 {"created_at":"2026-10-02T14:17:40.774409300+00:00","id":"01M3YFMPN6YFGYT1T1GPAAP57T","kind":"include","pattern":"tests/**","project_id":"01M3Y7GTXZ0PMRW4YFX94QNHS8","task_id":"01M3Y7GV86D6J5EMK2GB43A91A"}
 {"created_at":"2026-10-02T14:17:40.827596173+00:00","id":"01M3YFMPPVG5QM8QA8RCPYY6WZ","kind":"include","pattern":"docs/**","project_id":"01M3Y7GTXZ0PMRW4YFX94QNHS8","task_id":"01M3Y7GVA5XZ583MYWQAHE2QT2"}
 {"created_at":"2026-10-02T14:17:40.884901004+00:00","id":"01M3YFMPRMW825W0A2H7HZQ3VM","kind":"include","pattern":"tests/**","project_id":"01M3Y7GTXZ0PMRW4YFX94QNHS8","task_id":"01M3Y7GVA5XZ583MYWQAHE2QT2"}
+{"created_at":"2026-10-08T18:51:15.605963184+00:00","id":"01M4EDNYRPS6XG5FTKT5YQ02Y9","kind":"include","pattern":"lua/search/init.lua","project_id":"01M3Y7GTXZ0PMRW4YFX94QNHS8","task_id":"01M4EDNGQZW3A0AYDYNWF8D78G"}
+{"created_at":"2026-10-08T18:51:15.637373666+00:00","id":"01M4EDNYSNP7QEWH57DRJZXN9P","kind":"include","pattern":"tests/search.test.ts","project_id":"01M3Y7GTXZ0PMRW4YFX94QNHS8","task_id":"01M4EDNGQZW3A0AYDYNWF8D78G"}
