@@ -194,8 +194,17 @@ local function bounded_text(text)
   if #text <= M.MAX_DIAGNOSTIC_BYTES then
     return text
   end
-  return string.sub(text, 1, M.MAX_DIAGNOSTIC_BYTES - 3) .. "..."
+  local cut = M.MAX_DIAGNOSTIC_BYTES - 3
+  while cut > 0 do
+    local next_byte = string.byte(text, cut + 1)
+    if next_byte == nil or next_byte < 128 or next_byte >= 192 then
+      break
+    end
+    cut = cut - 1
+  end
+  return string.sub(text, 1, cut) .. "..."
 end
+M.bounded_text = bounded_text
 
 local function note(code, detail)
   page.last_code = code
@@ -690,8 +699,12 @@ do
   -- entries for tests and diagnostics; the command surface stays minimal
   -- (search/next/prev/clear/copy) and scope values always travel to the host
   -- for the authoritative check.
+  local commands = bitty.commands
+  if commands == nil or type(commands.register) ~= "function" then
+    return M
+  end
 
-  bitty.commands.register({
+  commands.register({
     id = "search",
     title = "Search: query transcript snapshots",
     description = "Run one bounded transcript snapshot search with an explicit scope; replaces the cached page.",
@@ -707,7 +720,7 @@ do
     end,
   })
 
-  bitty.commands.register({
+  commands.register({
     id = "next",
     title = "Search: next match",
     description = "Move the cursor to the next cached match; no host call.",
@@ -718,7 +731,7 @@ do
     end,
   })
 
-  bitty.commands.register({
+  commands.register({
     id = "prev",
     title = "Search: previous match",
     description = "Move the cursor to the previous cached match; no host call.",
@@ -729,7 +742,7 @@ do
     end,
   })
 
-  bitty.commands.register({
+  commands.register({
     id = "clear",
     title = "Search: clear results",
     description = "Drop the cached result page; the next query starts fresh.",
@@ -740,7 +753,7 @@ do
     end,
   })
 
-  bitty.commands.register({
+  commands.register({
     id = "copy",
     title = "Search: copy current match",
     description = "Export the current match through the clipboard gate; needs the separate clipboard.write grant.",

@@ -651,4 +651,29 @@ describe("mismatch disables with a diagnostic; fallback stays Core", () => {
     run.host.dispose();
     expect(() => dispatch(run, SEARCH_COMMAND, {})).toThrow();
   });
+
+  test("bounded_text backs off UTF-8 continuation bytes and headless activation without commands does not crash (search#24)", async () => {
+    const factory = new LuaFactory();
+    const lua = await factory.createEngine({ injectObjects: false });
+    try {
+      lua.global.set("bitty", {
+        api_version: "1.0.0",
+        settings: { get: () => undefined, set: () => true },
+      });
+      await lua.doString(ENTRY_SOURCE);
+      // 187 ASCII bytes + 3-byte "中" (bytes 188..190) + 10 ASCII bytes = 200 bytes (> 192).
+      // Raw byte cut at 189 (MAX_DIAGNOSTIC_BYTES - 3) would split "中" after byte 2.
+      // UTF-8 boundary cut backs off to 187, keeping 187 ASCII bytes + "..." (190 bytes).
+      const prefix = "a".repeat(187);
+      const input = `${prefix}中${"b".repeat(10)}`;
+      lua.global.set("test_input", input);
+      const bounded = (await lua.doString(
+        "return search.bounded_text(test_input)",
+      )) as string;
+      expect(bounded).toBe(`${prefix}...`);
+      expect(Buffer.byteLength(bounded, "utf8")).toBe(190);
+    } finally {
+      lua.global.close();
+    }
+  });
 });
