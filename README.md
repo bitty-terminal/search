@@ -17,6 +17,14 @@ navigation. It never mutates Terminal Truth, never streams, and never retries
 a denial silently: a failed refresh keeps the previous page intact. Record
 bodies are untrusted observation text, displayed verbatim and never executed.
 
+Start a query with `bitty-terminal.search:search`, which needs a panel and/or
+workspace scope plus a needle; the plugin installs no default chord. For
+example, run `bitty-terminal.search:search` with
+`{ panel = "<panel-id>", needle = "error", row_count = 10 }` and the command
+returns `ok` while caching the bounded matching page; `next` and `prev` then
+walk that page and `clear` drops it. Search paints no overlay of its own: the
+cached page and its cursor are the presentation state.
+
 ## Install
 
 Prerequisites:
@@ -104,8 +112,8 @@ Search registers no default keybindings. Bind a chord in
 return {
   keymaps = {
     {
-      chord = "ctrl+n",
-      action = "bitty-terminal.search:next",
+      chord = "ctrl+alt+n",
+      action = "command:bitty-terminal.search:next",
       context = "global",
     },
   },
